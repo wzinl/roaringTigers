@@ -1,15 +1,15 @@
 import spacy
 import pandas as pd
-from typing import List, Dict, Tuple
+from typing import Dict, Tuple
 import pycountry
 from thefuzz import fuzz
 from thefuzz import process
-import re
+
 
 class EntityExtractor:
     def __init__(self):
         # Load spaCy model
-        self.nlp = spacy.load("en_core_web_sm")
+        self.nlp = spacy.load("en_core_web_trf")
         
         # Initialize country name mappings
         self.country_mappings = self._initialize_country_mappings()

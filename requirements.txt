@@ -1,0 +1,10 @@
+spacy
+pandas
+pycountry
+thefuzz
+scikit-learn
+matplotlib
+mpl_toolkits.mplot3d
+python-dotenv
+sentence-transformers
+en_core_web_trf @ https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl#sha256=272a31e9d8530d1e075351d30a462d7e80e31da23574f1b274e200f3fff35bf5
