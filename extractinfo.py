@@ -14,6 +14,12 @@ class EntityExtractor:
         # Initialize country name mappings
         self.country_mappings = self._initialize_country_mappings()
         
+        self.labelList = list()
+        for label in self.nlp.get_pipe("ner").labels:
+            if(label in ["DATE", "FAC", "GPE", "LANGUAGE", "LAW", "LOC", "NORP", "ORG", "PERSON", "PRODUCT", "WORK_OF_ART"]):
+                self.labelList.append(label)
+            
+        # print(labelList)
         # Initialize event keywords for classification
         self.event_keywords = {
             'CRIME': ['arrest', 'theft', 'fraud', 'criminal', 'police', 'investigation'],
@@ -24,6 +30,7 @@ class EntityExtractor:
             'SPORTS': ['tournament', 'championship', 'match', 'game', 'olympics'],
             'BUSINESS': ['launch', 'partnership', 'contract', 'deal', 'startup']
         }
+
         
     def _initialize_country_mappings(self) -> Dict[str, str]:
         """Initialize standardized country name mappings using pycountry"""
@@ -110,33 +117,47 @@ class EntityExtractor:
         
         # Extract and standardize names
         names = set()
+        countries = set()
+
+        entDict = {'summary': summary}
+        for label in self.labelList:
+            entDict[label] = set()
         for ent in doc.ents:
             if ent.label_ == 'PERSON':
                 standardized_name = self.standardize_name(ent.text)
                 names.add(standardized_name)
-        
+            elif ent.label_ in self.labelList:
+                entDict[ent.label_].add(ent.text)
+        for label in entDict:
+            entDict[label] = sorted(entDict[label])
+            
+        entDict['summary'] =  summary
+        return entDict
+        # for ent in doc.ents:
+
+
+        #     if ent.label_ in ['GPE', 'LOC']:
+        #         standardized_country = self.standardize_country(ent.text)
+        #         if standardized_country:
+        #             countries.add(standardized_country)
+        # # 
         # Extract and standardize countries
-        countries = set()
-        for ent in doc.ents:
-            if ent.label_ in ['GPE', 'LOC']:
-                standardized_country = self.standardize_country(ent.text)
-                if standardized_country:
-                    countries.add(standardized_country)
+
         
-        # Deduplicate and sort
-        names = sorted(names)  # Sorted list of unique names
-        countries = sorted(countries)  # Sorted list of unique countries
+        # # Deduplicate and sort
+        # names = sorted(names)  # Sorted list of unique names
+        # countries = sorted(countries)  # Sorted list of unique countries
         
-        # Classify event
-        event_type, confidence = self.classify_event(summary)
+        # # Classify event
+        # event_type, confidence = self.classify_event(summary)
         
-        return {
-            'names': names,
-            'countries': countries,
-            'event_type': event_type,
-            'event_confidence': confidence,
-            'summary': summary
-        }
+        # return {
+        #     'names': names,
+        #     'countries': countries,
+        #     'event_type': event_type,
+        #     'event_confidence': confidence,
+        #     'summary': summary
+        # }
 
     def process_dataframe(self, df: pd.DataFrame, summary_col: str) -> pd.DataFrame:
         """Process entire dataframe of articles"""
@@ -147,8 +168,8 @@ class EntityExtractor:
         return pd.DataFrame(results)
 
 if __name__ == "__main__":
-    input_file = r'dataset\news_excerpts_parsed.xlsx'
-    output_file = r'dataset\extracted_info.xlsx'
+    input_file = r'dataset//news_excerpts_parsed.xlsx'
+    output_file = r'dataset//extracted_info.xlsx'
     
     # Load input data
     data = pd.read_excel(input_file)
