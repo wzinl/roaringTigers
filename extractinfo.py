@@ -15,6 +15,7 @@ class EntityExtractor:
         self.country_mappings = self._initialize_country_mappings()
         
         self.labelList = list()
+        print(self.nlp.get_pipe("ner").labels)
         for label in self.nlp.get_pipe("ner").labels:
             if(label in ["DATE", "FAC", "GPE", "LANGUAGE", "LAW", "LOC", "NORP", "ORG", "PERSON", "PRODUCT", "WORK_OF_ART"]):
                 self.labelList.append(label)
@@ -125,7 +126,7 @@ class EntityExtractor:
         for ent in doc.ents:
             if ent.label_ == 'PERSON':
                 standardized_name = self.standardize_name(ent.text)
-                names.add(standardized_name)
+                entDict[ent.label_].add(standardized_name)
             elif ent.label_ in self.labelList:
                 entDict[ent.label_].add(ent.text)
         for label in entDict:
@@ -145,7 +146,7 @@ class EntityExtractor:
 
         
         # # Deduplicate and sort
-        # names = sorted(names)  # Sorted list of unique names
+        # names = sorted(names)  # Sorted list of unique namesx     
         # countries = sorted(countries)  # Sorted list of unique countries
         
         # # Classify event
