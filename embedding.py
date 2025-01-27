@@ -37,7 +37,7 @@ PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
 # Index configuration
-index_name = "datathon"
+index_name = "roaringtigertest"
 dimension = 1024  # Adjust based on multilingual-e5-large model dimension
 
 # Connect to the Pinecone index
