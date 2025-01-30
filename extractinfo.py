@@ -1,3 +1,5 @@
+import os
+
 import spacy
 import pandas as pd
 from typing import Dict, Tuple
@@ -15,12 +17,10 @@ class EntityExtractor:
         self.country_mappings = self._initialize_country_mappings()
         
         self.labelList = list()
-        print(self.nlp.get_pipe("ner").labels)
         for label in self.nlp.get_pipe("ner").labels:
             if(label in ["DATE", "FAC", "GPE", "LANGUAGE", "LAW", "LOC", "NORP", "ORG", "PERSON", "PRODUCT", "WORK_OF_ART"]):
                 self.labelList.append(label)
             
-        # print(labelList)
         # Initialize event keywords for classification
         self.event_keywords = {
             'CRIME': ['arrest', 'theft', 'fraud', 'criminal', 'police', 'investigation'],
@@ -169,8 +169,9 @@ class EntityExtractor:
         return pd.DataFrame(results)
 
 if __name__ == "__main__":
-    input_file = r'dataset//news_excerpts_parsed.xlsx'
-    output_file = r'dataset//extracted_info.xlsx'
+    input_file = os.path.join("dataset", "news_excerpts_parsed.xlsx")
+    output_file = os.path.join("dataset", "extracted_info.xlsx")
+    
     
     # Load input data
     data = pd.read_excel(input_file)
