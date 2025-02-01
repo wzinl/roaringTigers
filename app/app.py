@@ -10,7 +10,6 @@ import requests
 import hashlib
 from pinecone import Pinecone
 
-import psycopg
 from psycopg_pool import ConnectionPool
 
 # AWS RDS and Pinecone Configuration
@@ -41,7 +40,17 @@ conn_str = (
 )
 
 # Initialize the connection pool
-pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
+connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
+
+def get_article_entity(field, uuid):
+    """Fetch documents from RDS based on a specific field."""
+    with connect_pool as pool:
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                query = f"SELECT {field} FROM ARTICLES WHERE uuid = %s;"
+                cur.execute(query, (uuid, ))   
+                return cur.fetchall()
+
 
 
 def get_pinecone_results(query):
