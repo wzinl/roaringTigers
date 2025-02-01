@@ -5,6 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import warnings
+import os
 warnings.filterwarnings('ignore')
 
 def extract_date_from_text(text):
@@ -116,6 +117,7 @@ def process_urls_with_progress(urls):
 def main():
     # Read URLs from Excel file
     excel_file = "path/to/your/excel_file.xlsx"
+    excel_file = os.path.join("path", "to", "your", "excel_file.xlsx")
     df = pd.read_excel(excel_file)
     
     # Ensure the 'Link' column exists

@@ -6,13 +6,13 @@ import uuid  # Import Python's UUID module
 import psycopg
 
 class toInsert:
-    def __init__(self, zeroShotFile, nerFile):
+    def __init__(self, input):
         
         # initialize zeroshot labels
-        self.zeroshotlabels = self.extract_labels(zeroShotFile)
+        self.zeroshotlabels = self.extract_labels(input)
 
         # initialize entities in a list
-        self.entities = self.get_entities(nerFile)
+        self.entities = self.get_entities(input)
 
 
     # get entities
@@ -39,27 +39,21 @@ class toInsert:
     # Function to extract labels from the file
     def extract_labels(self, file_path):
         zeroshortdf = pd.read_excel(file_path, sheet_name='Sheet1')
-        score_columns = zeroshortdf.columns[3:]  # Score columns start from index 3
+        score_columns = zeroshortdf.columns[17:]  # Score columns start from index 3
 
         # Apply the function to each row and create a new column for the top 3 labels
         zeroshortdf['top_3_labels'] = zeroshortdf.apply(lambda row: self.get_top_3_labels(row, score_columns), axis=1)
         
         return zeroshortdf["top_3_labels"]
-    
-
-def insert_rows(toInsertInstance):
-    toInsertInstance
 
 # Load the Excel file paths
 if __name__ == "__main__":
-    newsexcerpts_zeroshot = os.path.join("upload_data", "zeroshot_news_excerpts.xlsx")
-    wikileaks_zeroshot = os.path.join("upload_data", "zeroshot_wikileaks.xlsx")
+    input_data = os.path.join("master_data", "master_sheet.xlsx")
 
-    newsexcerpts_ner = os.path.join("upload_data", "NER_news_excerpts.xlsx")
-    wikileaks_ner= os.path.join("upload_data", "NER_wikileaks.xlsx")
+    input_data = toInsert(input_data)
 
-    newsexcerpts = toInsert(newsexcerpts_zeroshot, newsexcerpts_ner)
-    wikileaks = toInsert(wikileaks_zeroshot, wikileaks_ner)
+    # print(wikileaks.entities[0]['UUID'])  # Print first few rows for verification
+
 
     # Print results
     # print(newsexcerpts.zeroshotlabels)  # Print first few rows for verification
@@ -70,18 +64,20 @@ if __name__ == "__main__":
     with psycopg.connect(
         dbname="postgres",
         user="postgres",
-        password="roaring_Lionsdb",
-        host="datathondb.cpeue8qq0l9u.ap-southeast-1.rds.amazonaws.com",
+        # insert password
+        password="",
+        host="",
         port='5432'
     ) as conn:
         with conn.cursor() as cur:
             # Execute a command: this creates a new table
-            for index, labels in wikileaks.zeroshotlabels.items():
+            for index, labels in input_data.zeroshotlabels.items():
                 label = [labels[0], labels[1], labels[2]]
-                summary = wikileaks.entities[index]['summary']
-                record_uuid = uuid.uuid4()
+                summary = input_data.entities[index]['summary']
+                record_uuid = input_data.entities[index]['UUID']
+                link = input_data.entities[index]['link']
                 # print(labels[0])
                 cur.execute("""
-                    INSERT INTO public.articles(uuid, summary, "zeroshotLabels") VALUES (%s, %s, %s);
-                    """, (record_uuid, summary, label))
+                    INSERT INTO public.articles(uuid, summary, zeroshot_labels, link) VALUES (%s, %s, %s, %s);
+                    """, (record_uuid, summary, label, link))
 
