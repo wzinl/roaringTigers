@@ -41,6 +41,7 @@ if __name__ == "__main__":
         for index, string in enumerate(orgList):
             orgList[index] = string[1:-1]
         article["updated_orgs"] = orgList
+        article["date"] = row["DATE"]
         articles.append(article)
 
     with psycopg.connect(
@@ -53,12 +54,17 @@ if __name__ == "__main__":
     ) as conn:
         with conn.cursor() as cur:
             for article in articles:
-                if article["updated_persons"] != ['']:
-                    cur.execute("""
-                    UPDATE articles SET persons = %s WHERE uuid = %s;
-                    """, (article["updated_persons"], article["uuid"]))
-                if article["updated_orgs"] != ['']:
-                    cur.execute("""
-                    UPDATE articles SET orgs = %s WHERE uuid = %s;
-                    """, (article["updated_orgs"], article["uuid"]))
+                print(article['date'])
+                # if article["updated_persons"] != ['']:
+                #     cur.execute("""
+                #     UPDATE articles SET persons = %s WHERE uuid = %s;
+                #     """, (article["updated_persons"], article["uuid"]))
+                # if article["updated_orgs"] != ['']:
+                #     cur.execute("""
+                #     UPDATE articles SET orgs = %s WHERE uuid = %s;
+                #     """, (article["updated_orgs"], article["uuid"]))
+                # if article["date"] != '':
+                #     cur.execute("""
+                #     UPDATE articles SET orgs = %s WHERE uuid = %s;
+                #     """, (article["updated_orgs"], article["uuid"]))    
                 

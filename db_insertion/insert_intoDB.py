@@ -48,7 +48,7 @@ class toInsert:
 
 # Load the Excel file paths
 if __name__ == "__main__":
-    input_data = os.path.join("master_data", "master_sheet.xlsx")
+    input_data = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'master_data', 'master_sheet.xlsx'))
 
     input_data = toInsert(input_data)
 
