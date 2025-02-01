@@ -10,22 +10,13 @@ import requests
 import hashlib
 from pinecone import Pinecone
 
+import psycopg
 from psycopg_pool import ConnectionPool
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX = st.secrets["INDEX"]
-
-
-
-def execute_query(query, params=None):
-    # Acquire a connection from the pool
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM your_table", params)
-            if cur.description:  # If the query returns data (e.g., SELECT)
-                return cur.fetchall()
 
 # Database Connections
     # """Establish connection to AWS RDS."""
@@ -47,7 +38,14 @@ def get_article_entity(field, uuid):
     with connect_pool as pool:
         with pool.connection() as conn:
             with conn.cursor() as cur:
-                query = f"SELECT {field} FROM ARTICLES WHERE uuid = %s;"
+                if field == "gpe":
+                    query = f"""SELECT g.name
+                                FROM articles a
+                                JOIN article_gpe ag ON a.article_id = ag.article_id
+                                JOIN gpe g ON ag.gpe_id = g.gpe_id
+                                WHERE a.uuid = %s;"""
+                else:
+                    query = f"SELECT {field} FROM ARTICLES WHERE uuid = %s;"
                 cur.execute(query, (uuid, ))   
                 return cur.fetchall()
 
