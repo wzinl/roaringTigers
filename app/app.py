@@ -12,7 +12,7 @@ from pinecone import Pinecone
 from sqlalchemy import create_engine
 
 # AWS RDS and Pinecone Configuration
-AWS_REGION = st.secrets["REGION"]
+AWS_REGION = st.secrets["REGION"]   
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX = st.secrets["INDEX"]
 
@@ -95,7 +95,7 @@ def fetch_documents_by_field(field_type, field_value):
         return []
     
     query = f"""
-    SELECT * FROM documents 
+    SELECT * FROM articles 
     WHERE {field_type} = '{field_value}'
     """
     return pd.read_sql(query, engine)
