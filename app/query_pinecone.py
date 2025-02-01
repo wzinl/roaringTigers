@@ -17,3 +17,4 @@ def query_pinecone(doc_UUID):
         "matches": [res['id'] for res in similar['matches'][1:]]
         #return object: [UUID1, UUID2, UUID3]
     }
+
