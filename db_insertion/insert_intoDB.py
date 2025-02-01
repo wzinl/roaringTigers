@@ -1,8 +1,5 @@
 import pandas as pd
 import os
-
-import uuid  # Import Python's UUID module
-
 import psycopg
 
 class toInsert:

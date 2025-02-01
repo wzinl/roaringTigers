@@ -1,8 +1,5 @@
 import pandas as pd
 import os
-
-import uuid  # Import Python's UUID module
-
 import psycopg
 
 class toInsert:
@@ -28,8 +25,8 @@ class toInsert:
 
 
 # check if one entity is an abbreviation
-def is_abbreviation(str1: str, str2: str) -> bool:
-    def get_abbreviation(full_str: str) -> str:
+def is_abbreviation(str1, str2):
+    def get_abbreviation(full_str):
         """
         Generate an abbreviation by taking the first letter of each word.
         """
