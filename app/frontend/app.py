@@ -151,7 +151,7 @@ def main():
         st.subheader("Document Search")
         
         # Search options
-        search_type = st.selectbox("Search By", ["Tags", "Entities", "Datetime"])
+        search_type = st.selectbox("Search By", ["Tags", "Person", "Geo-Political Entity", "Organisation"])
         search_query = st.text_input(f"Enter {search_type}")
         
         if st.button("Search"):
