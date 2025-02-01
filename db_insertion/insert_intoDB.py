@@ -49,15 +49,6 @@ if __name__ == "__main__":
 
     input_data = toInsert(input_data)
 
-    # print(wikileaks.entities[0]['UUID'])  # Print first few rows for verification
-
-
-    # Print results
-    # print(newsexcerpts.zeroshotlabels)  # Print first few rows for verification
-    # print(newsexcerpts.entities)  # Print first few rows for verification
-
-    # print(wikileaks.zeroshotlabels)  # Print first few rows for verification
-
     with psycopg.connect(
         dbname="postgres",
         user="postgres",
@@ -72,9 +63,8 @@ if __name__ == "__main__":
                 label = [labels[0], labels[1], labels[2]]
                 summary = input_data.entities[index]['summary']
                 record_uuid = input_data.entities[index]['UUID']
-                link = input_data.entities[index]['link']
-                # print(labels[0])
                 cur.execute("""
-                    INSERT INTO public.articles(uuid, summary, zeroshot_labels, link) VALUES (%s, %s, %s, %s);
-                    """, (record_uuid, summary, label, link))
+                    INSERT INTO public.articles(uuid, summary, zeroshot_labels, link) VALUES (%s, %s, %s);
+                    """, (record_uuid, summary, label))
+                
 

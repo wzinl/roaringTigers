@@ -4,18 +4,14 @@ import psycopg
 
 class toInsert:
     def __init__(self, extracted):
-        
-
         # initialize entities in a list
         self.entities = self.get_entities(extracted)
-
-
+        
     # get entities
     def get_entities(self, extracted):
         nerdf = pd.read_excel(extracted, sheet_name='Sheet1')
         entityList = []
         for index,row in nerdf.iterrows():
-            # entities[index] = row[index]
             entities = {}
             for column, value in row.items():
                 entities[column] = value
@@ -35,7 +31,7 @@ def is_abbreviation(str1, str2):
 
     # Convert both strings to lowercase for case-insensitive comparison
     str1_lower = str1.lower()
-    str2_lower = str2.lower()
+    # str2_lower = str2.lower()
 
     # Check if str1 is an abbreviation of str2
     if str1_lower == get_abbreviation(str2):
@@ -102,7 +98,7 @@ def standardize_entities(extracted, entity):
                     updated_entity = updated_entity[4:]
                 new_list.append(updated_entity)
         extracted[i]["GPE"] = str(new_list)
-        output.append({"uuid": extracted[i]["UUID"], "GPE": new_list, "summary" : extracted[i]["summary"]})
+        output.append({"uuid": extracted[i]["UUID"], "GPE": new_list, "summary" : extracted[i]["summary"], "link" : extracted[i]["link"]})
 
     return output
             
@@ -110,7 +106,8 @@ def standardize_entities(extracted, entity):
     
 # Load the Excel file paths
 if __name__ == "__main__":
-    input_data = os.path.join("master_data", "master_sheet.xlsx")
+    input_data = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'master_data', 'master_sheet.xlsx'))
+
     extracted = toInsert(input_data).entities
     standardized = standardize_entities(extracted, 'GPE')
 
@@ -119,11 +116,15 @@ if __name__ == "__main__":
         user="postgres",
         # insert password
         password="",
-        host="",
+        host="datathondb.cpeue8qq0l9u.ap-southeast-1.rds.amazonaws.com",
         port='5432'
     ) as conn:
         with conn.cursor() as cur:
             for article in standardized:
+                if str(article["link"]) != "nan":
+                    cur.execute("""
+                        UPDATE articles SET link = %s WHERE uuid = %s;
+                        """, (article["link"], article["uuid"]))
                 for gpe in article['GPE']:
                     cur.execute("""
                         insert into  article_gpe ( article_id, gpe_id )
