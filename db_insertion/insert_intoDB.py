@@ -1,6 +1,9 @@
 import pandas as pd
 import os
 import psycopg
+import streamlit as st
+
+DB_PASS = st.secrets["DB_PASS"]   
 
 class toInsert:
     def __init__(self, input):
@@ -52,8 +55,7 @@ if __name__ == "__main__":
     with psycopg.connect(
         dbname="postgres",
         user="postgres",
-        # insert password
-        password="",
+        password=DB_PASS,
         host="",
         port='5432'
     ) as conn:
@@ -64,7 +66,7 @@ if __name__ == "__main__":
                 summary = input_data.entities[index]['summary']
                 record_uuid = input_data.entities[index]['UUID']
                 cur.execute("""
-                    INSERT INTO public.articles(uuid, summary, zeroshot_labels, link) VALUES (%s, %s, %s);
+                    INSERT INTO public.articles(uuid, summary, zeroshot_labels) VALUES (%s, %s, %s);
                     """, (record_uuid, summary, label))
                 
 

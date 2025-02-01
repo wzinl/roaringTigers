@@ -9,22 +9,40 @@ import boto3
 import requests
 import hashlib
 from pinecone import Pinecone
-from sqlalchemy import create_engine
+
+import psycopg
+from psycopg_pool import ConnectionPool
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX = st.secrets["INDEX"]
 
+
+
+def execute_query(query, params=None):
+    # Acquire a connection from the pool
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM your_table", params)
+            if cur.description:  # If the query returns data (e.g., SELECT)
+                return cur.fetchall()
+
 # Database Connections
-def get_rds_connection():
-    """Establish connection to AWS RDS."""
-    try:
-        engine = create_engine(f'postgresql://{st.secrets["USER"]}:{st.secrets["PASSWORD"]}@{st.secrets["HOST"]}:{st.secrets["PORT"]}/{st.secrets["DBNAME"]}')
-        return engine
-    except Exception as e:
-        st.error(f"Database connection error: {e}")
-        return None
+    # """Establish connection to AWS RDS."""
+# Database configuration
+# Create the connection string
+conn_str = (
+    f"dbname={st.secrets["DBNAME"]} "
+    f"user={st.secrets["USER"]} "
+    f"password={st.secrets["PASSWORD"]} "
+    f"host={st.secrets["HOST"]} "
+    f"port={st.secrets["PORT"]}"
+)
+
+# Initialize the connection pool
+pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
+
 
 def get_pinecone_results(query):
     """Fetch related articles from Pinecone."""

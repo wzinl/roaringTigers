@@ -1,6 +1,10 @@
 import pandas as pd
 import os
 import psycopg
+import streamlit as st
+
+DB_PASS = st.secrets["DB_PASS"]   
+
 
 
 def remove_substrings(strings):
@@ -26,19 +30,24 @@ if __name__ == "__main__":
     for index,row in df.iterrows():
         article = {}
         article["uuid"] = row["UUID"]
-        newlist = row["PERSON"][1:-1].split(', ')
-        for index, string in enumerate(newlist):
-            newlist[index] = string[1:-1]
+        personList = row["PERSON"][1:-1].split(', ')
+        for index, string in enumerate(personList):
+            personList[index] = string[1:-1]
         # print(newlist)
-        newlist = remove_substrings(newlist)
-        article["updated_persons"] = newlist
+        personList = remove_substrings(personList)
+        article["updated_persons"] = personList
+
+        orgList = row["ORG"][1:-1].split(', ')
+        for index, string in enumerate(orgList):
+            orgList[index] = string[1:-1]
+        article["updated_orgs"] = orgList
         articles.append(article)
 
     with psycopg.connect(
         dbname="postgres",
         user="postgres",
         # insert password
-        password="",
+        password=DB_PASS,
         host="datathondb.cpeue8qq0l9u.ap-southeast-1.rds.amazonaws.com",
         port='5432'
     ) as conn:
@@ -46,5 +55,10 @@ if __name__ == "__main__":
             for article in articles:
                 if article["updated_persons"] != ['']:
                     cur.execute("""
-                    UPDATE articles SET link = %s WHERE uuid = %s;
+                    UPDATE articles SET persons = %s WHERE uuid = %s;
                     """, (article["updated_persons"], article["uuid"]))
+                if article["updated_orgs"] != ['']:
+                    cur.execute("""
+                    UPDATE articles SET orgs = %s WHERE uuid = %s;
+                    """, (article["updated_orgs"], article["uuid"]))
+                

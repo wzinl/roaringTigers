@@ -1,6 +1,10 @@
 import pandas as pd
 import os
 import psycopg
+import streamlit as st
+
+DB_PASS = st.secrets["DB_PASS"]   
+
 
 class toInsert:
     def __init__(self, extracted):
@@ -115,7 +119,7 @@ if __name__ == "__main__":
         dbname="postgres",
         user="postgres",
         # insert password
-        password="",
+        password=DB_PASS,
         host="datathondb.cpeue8qq0l9u.ap-southeast-1.rds.amazonaws.com",
         port='5432'
     ) as conn:
@@ -125,10 +129,10 @@ if __name__ == "__main__":
                     cur.execute("""
                         UPDATE articles SET link = %s WHERE uuid = %s;
                         """, (article["link"], article["uuid"]))
-                for gpe in article['GPE']:
-                    cur.execute("""
-                        insert into  article_gpe ( article_id, gpe_id )
-                        values ( (select article_id from articles where uuid = %s),
-                        (select gpe_id from gpe where name = %s) );
-                        """, (article["uuid"], gpe))
+                # for gpe in article['GPE']:
+                #     cur.execute("""
+                #         insert into  article_gpe ( article_id, gpe_id )
+                #         values ( (select article_id from articles where uuid = %s),
+                #         (select gpe_id from gpe where name = %s) );
+                #         """, (article["uuid"], gpe))
 
