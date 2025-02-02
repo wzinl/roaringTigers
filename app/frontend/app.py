@@ -50,8 +50,73 @@ def get_article_entity(field, uuid):
                 cur.execute(query, (uuid,))
                 return cur.fetchall()
 
+def fetch_article(field ,value):
+    """Fetch documents from RDS based on a specific field."""
+    connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
+    with connect_pool.connection() as conn:
+        with conn.cursor() as cur:
+            if field == "Person":
+                field = "persons"
+                value = value[0].capitalize() + value[1:]
+            if field == "Geo-Political Entity":
+                # field = "gpe"
+                field = "name"
+            if field == "Organisation":
+                field = "orgs"
+                value = value[0].capitalize() + value[1:]
+            if field == "Tags":
+                field = "zeroshot_labels"
+            print(field)
+            if field == "zeroshot_labels" or field == "org" or field== "persons":
+                query = f"""
+                SELECT 
+                ARRAY_AGG(g.name) AS gpe_names,
+                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary
+                FROM ARTICLES a
+                JOIN article_gpe ag ON a.article_id = ag.article_id
+                JOIN gpe g ON ag.gpe_id = g.gpe_id
+                WHERE %s = ANY(a.{field})
+                GROUP BY 
+                    a.title, 
+                    a.orgs, 
+                    a.zeroshot_labels, 
+                    a.persons, 
+                    a.link, 
+                    a.date, 
+                    a.summary;
+                """
+                cur.execute(query, (value,))
+            else:
+                query = f"""
+                SELECT 
+                ARRAY_AGG(g.name) AS gpe_names,
+                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary
+                FROM ARTICLES a
+                JOIN article_gpe ag ON a.article_id = ag.article_id
+                JOIN gpe g ON ag.gpe_id = g.gpe_id
+                WHERE %s = g.{field}
+                GROUP BY 
+                    a.title, 
+                    a.orgs, 
+                    a.zeroshot_labels, 
+                    a.persons, 
+                    a.link, 
+                    a.date, 
+                    a.summary;
+                """
+                cur.execute(query, (value, ))
+            output = []
+            results = cur.fetchall()
+            print(field)
+            for result in results:
+                output_dict = {"Title": result[1],"Geo-Political Entities": result[0], "Orgs": result[2], "Tags": result[3], "Persons": result[4],
+                        "Link": result[5], "Date": result[6], "Summary": result[7]}
+                output.append(output_dict)
+            return output
+
 def get_filtered_article(field, query_type):
     """Fetch documents from RDS based on a specific field."""
+    connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
     with connect_pool as pool:
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -77,7 +142,7 @@ def query_pinecone(doc_UUID):
         id = doc_UUID,
         top_k = 4,
     )
-    
+    print(similar)
     res_arr = [res['id'] for res in similar['matches'][1:]]
     return res_arr
         
@@ -155,18 +220,6 @@ def visualize_graph(G):
     with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
         net.save_graph(tmpfile.name)
         return tmpfile.name
-
-# def fetch_documents_by_field(field_type, field_value):
-#     """Fetch documents from RDS based on a specific field."""
-#     engine = get_rds_connection()
-#     if not engine:
-#         return []
-    
-#     query = f"""
-#     SELECT * FROM articles 
-#     WHERE {field_type} = '{field_value}'
-#     """
-#     return pd.read_sql(query, engine)
 
 def get_paginated_articles(offset, limit):
     """Get a page of articles with basic information."""
@@ -317,32 +370,34 @@ def main():
         if st.button("Search"):
             # Fetch documents
             # results = fetch_documents_by_field(search_type.lower(), search_query)
-            results = get_filtered_article(search_query, search_type)
-
+            # results = get_filtered_article(search_query, search_type)
+            print(search_type)
+            results = fetch_article(search_type, search_query)
             if len(results) != 0:
                 st.dataframe(results)
                 
                 # Related Articles from Pinecone
-                related_articles = query_pinecone(search_query)
+                # related_articles = query_pinecone(search_query)
                 
                 st.subheader("Related Articles")
+                # print(related_articles)
                 # displaying of the 3 articles
-                cols = st.columns(3)  # 3 columns for 3 articles
-                for i, col in enumerate(cols):
-                    with col:
-                        st.subheader(get_article_entity("title", related_articles[i]))
-                        date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
-                        st.write(date)
-                        tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
-                        st.write(tags)
-                        persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
-                        st.write(persons)
-                        companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
-                        st.write(companies)
+                # cols = st.columns(3)  # 3 columns for 3 articles
+                # for i, col in enumerate(cols):
+                #     with col:
+                #         st.subheader(get_article_entity("title", related_articles[i]))
+                #         date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
+                #         st.write(date)
+                #         tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
+                #         st.write(tags)
+                #         persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
+                #         st.write(persons)
+                #         companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
+                #         st.write(companies)
 
                 # Knowledge Graph
                 all_entities = []
-                all_relations = []
+                all_relations = [] 
                 for article in related_articles:
                     entities, relations = process_text(article, nlp)
                     all_entities.append(entities)
