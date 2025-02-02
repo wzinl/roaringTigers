@@ -4,7 +4,7 @@ NewsNetwork aims to provide a comprehensive, visual link between entities extrac
 
 ## Installation
 
-1. Move the `secrets.toml` file provided in Google Sheets to the `.streamlit` folder.
+1. Move the `.streamlit` folder provided in the zip file on google forms to the `roaringTigers` folder.
 2. Install the required dependencies:
 
    ```bash
