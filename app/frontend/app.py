@@ -363,7 +363,7 @@ def show_article_detail(nlp):
     
     for i, col in enumerate(cols):
         with col:
-            result = fetch_article("uuid", related_articles[i])#[0]
+            result = fetch_article("uuid", related_articles[i])[0]
             print(result)
             st.subheader(result["Title"])
             date = f"📅 **Date:** {result["Date"]}"
