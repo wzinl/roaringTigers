@@ -12,9 +12,6 @@ import psycopg
 from psycopg_pool import ConnectionPool
 import uuid
 from typing import List
-import ast
-import time
-from tqdm import tqdm
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
