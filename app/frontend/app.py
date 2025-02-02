@@ -71,7 +71,7 @@ def fetch_article(field ,value):
             if field == "Tags":
                 field = "zeroshot_labels"
             print(field)
-            if field == "zeroshot_labels" or field == "org" or field== "persons":
+            if field == "zeroshot_labels" or field == "orgs" or field== "persons":
                 query = f"""
                 SELECT 
                 ARRAY_AGG(g.name) AS gpe_names,
@@ -116,7 +116,6 @@ def fetch_article(field ,value):
                 cur.execute(query, (value, ))
             output = []
             results = cur.fetchall()
-            print(field)
             for result in results:
                 output_dict = {"Title": result[1],"Geo-Political Entities": result[0], "Orgs": result[2], "Tags": result[3], "Persons": result[4],
                         "Link": result[5], "Date": result[6], "Summary": result[7]}
@@ -363,17 +362,18 @@ def show_article_detail(nlp):
     
     for i, col in enumerate(cols):
         with col:
-            result = fetch_article("uuid", related_articles[i])[0]
-            print(result)
-            st.subheader(result["Title"])
-            date = f"📅 **Date:** {result["Date"]}"
-            st.write(date)
-            tags = f"🏷 **Tags:** {result["Tags"]}"
-            st.write(tags)
-            persons = f"🧑‍⚖️ **Persons:** {result["Persons"]}"
-            st.write(persons)
-            companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
-            st.write(companies)
+            result = fetch_article("uuid", related_articles[i])
+            if len(result) >= 1:
+                result = result[0]
+                st.subheader(result["Title"])
+                date = f"📅 **Date:** {result["Date"]}"
+                st.write(date)
+                tags = f"🏷 **Tags:** {result["Tags"]}"
+                st.write(tags)
+                persons = f"🧑‍⚖️ **Persons:** {result["Persons"]}"
+                st.write(persons)
+                companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
+                st.write(companies)
 
         
 
