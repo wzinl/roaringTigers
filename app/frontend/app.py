@@ -9,6 +9,7 @@ from pinecone import Pinecone
 import math
 import psycopg
 from psycopg_pool import ConnectionPool
+import uuid
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -35,6 +36,7 @@ conn_str = (
 connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
 
 def get_article_entity(field, uuid):
+    connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
     """Fetch documents from RDS based on a specific field."""
     with connect_pool as pool:
         with pool.connection() as conn:
@@ -321,9 +323,46 @@ def show_article_list():
                 st.session_state.current_page = current_page + 1
                 # st.experimental_rerun()
 
-def show_article_detail():
+def show_article_detail(nlp):
     """Display the article detail page."""
     details = get_article_details(st.session_state.selected_article)
+    related_articles = query_pinecone(str(st.session_state.selected_article))
+    all_ents = []
+    all_relations = []
+    for article in related_articles:
+        #fetch summary
+        summary = get_article_entity("summary", uuid.UUID(article))
+        #process summary
+        ents, relations = process_text(str(summary), nlp)
+        all_ents.extend(ents)
+        all_relations.extend(relations)
+
+    #call graph function
+    g = create_graph(all_ents, all_relations)
+    visualize_graph(g)
+
+
+    st.subheader("Related Articles")
+    #displaying of the 3 articles
+    cols = st.columns(3)  # 3 columns for 3 articles
+    
+    for i, col in enumerate(cols):
+        with col:
+            result = fetch_article("uuid", related_articles[i])
+            print(result)
+            st.subheader(get_article_entity("title", uuid.UUID(related_articles[i])))
+            date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
+            st.write(date)
+            tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
+            st.write(tags)
+            persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
+            st.write(persons)
+            companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
+            st.write(companies)
+
+        
+
+
     
     # Add back button
     if st.button("← Back to Articles"):
@@ -377,11 +416,11 @@ def main():
                 st.dataframe(results)
                 
                 # Related Articles from Pinecone
-                # related_articles = query_pinecone(search_query)
+                # related_articles = query_pinecone(st.session_state.selected_article)
                 
-                st.subheader("Related Articles")
+                # st.subheader("Related Articles")
                 # print(related_articles)
-                # displaying of the 3 articles
+                # #displaying of the 3 articles
                 # cols = st.columns(3)  # 3 columns for 3 articles
                 # for i, col in enumerate(cols):
                 #     with col:
@@ -396,20 +435,20 @@ def main():
                 #         st.write(companies)
 
                 # Knowledge Graph
-                all_entities = []
-                all_relations = [] 
-                for article in related_articles:
-                    entities, relations = process_text(article, nlp)
-                    all_entities.append(entities)
-                    all_relations.append(relations)
-                G = create_graph(all_entities, all_relations)
-                html_file = visualize_graph(G)
-                with open(html_file, 'r', encoding='utf-8') as f:
-                    html_data = f.read()
-                st.components.v1.html(html_data, height=800)
+                # all_entities = []
+                # all_relations = [] 
+                # for article in related_articles:
+                #     entities, relations = process_text(article, nlp)
+                #     all_entities.append(entities)
+                #     all_relations.append(relations)
+                # G = create_graph(all_entities, all_relations)
+                # html_file = visualize_graph(G)
+                # with open(html_file, 'r', encoding='utf-8') as f:
+                #     html_data = f.read()
+                # st.components.v1.html(html_data, height=800)
             
-                # Clean up
-                os.unlink(html_file)
+                # # Clean up
+                # os.unlink(html_file)
                 
     if 'page' not in st.session_state:
         st.session_state.page = "list"
@@ -418,7 +457,7 @@ def main():
     if st.session_state.page == "list":
         show_article_list()
     elif st.session_state.page == "article_detail":
-        show_article_detail()
+        show_article_detail(nlp)
     
                 
                 # for article in related_articles:
