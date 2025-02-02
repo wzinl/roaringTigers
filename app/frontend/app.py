@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import spacy
 import networkx as nx
@@ -10,6 +11,10 @@ import math
 import psycopg
 from psycopg_pool import ConnectionPool
 import uuid
+from typing import List
+import ast
+import time
+from tqdm import tqdm
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -37,7 +42,7 @@ connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
 
 def get_article_entity(field, uuid):
     connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
-    """Fetch documents from RDS based on a specific field."""
+    # Fetch documents from RDS based on a specific field.
     with connect_pool as pool:
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -53,7 +58,7 @@ def get_article_entity(field, uuid):
                 return cur.fetchall()
 
 def fetch_article(field ,value):
-    """Fetch documents from RDS based on a specific field."""
+    # Fetch documents from RDS based on a specific field.
     connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
     with connect_pool.connection() as conn:
         with conn.cursor() as cur:
@@ -89,6 +94,11 @@ def fetch_article(field ,value):
                 """
                 cur.execute(query, (value,))
             else:
+                if field == "uuid":
+                    fieldStr = f"a.{field}"
+                else:    
+                    fieldStr = f"g.{field}"
+
                 query = f"""
                 SELECT 
                 ARRAY_AGG(g.name) AS gpe_names,
@@ -96,7 +106,7 @@ def fetch_article(field ,value):
                 FROM ARTICLES a
                 JOIN article_gpe ag ON a.article_id = ag.article_id
                 JOIN gpe g ON ag.gpe_id = g.gpe_id
-                WHERE %s = g.{field}
+                WHERE %s = {fieldStr}
                 GROUP BY 
                     a.title, 
                     a.orgs, 
@@ -117,7 +127,7 @@ def fetch_article(field ,value):
             return output
 
 def get_filtered_article(field, query_type):
-    """Fetch documents from RDS based on a specific field."""
+    # Fetch documents from RDS based on a specific field.
     connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
     with connect_pool as pool:
         with pool.connection() as conn:
@@ -144,7 +154,6 @@ def query_pinecone(doc_UUID):
         id = doc_UUID,
         top_k = 4,
     )
-    print(similar)
     res_arr = [res['id'] for res in similar['matches'][1:]]
     return res_arr
         
@@ -221,7 +230,10 @@ def visualize_graph(G):
     # Generate HTML file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
         net.save_graph(tmpfile.name)
-        return tmpfile.name
+        with open(tmpfile.name, "r", encoding = "utf-8") as f:
+            html_content = f.read()
+        
+    return html_content
 
 def get_paginated_articles(offset, limit):
     """Get a page of articles with basic information."""
@@ -329,6 +341,11 @@ def show_article_detail(nlp):
     related_articles = query_pinecone(str(st.session_state.selected_article))
     all_ents = []
     all_relations = []
+    curr_summary = get_article_entity("summary", st.session_state.selected_article)
+    ents, relations = process_text(str(curr_summary), nlp)
+    all_ents.extend(ents)
+    all_ents.extend(relations)
+
     for article in related_articles:
         #fetch summary
         summary = get_article_entity("summary", uuid.UUID(article))
@@ -339,7 +356,8 @@ def show_article_detail(nlp):
 
     #call graph function
     g = create_graph(all_ents, all_relations)
-    visualize_graph(g)
+    graph_html = visualize_graph(g)
+    components.html(graph_html, height=750, width=900, scrolling=True)
 
 
     st.subheader("Related Articles")
@@ -348,16 +366,16 @@ def show_article_detail(nlp):
     
     for i, col in enumerate(cols):
         with col:
-            result = fetch_article("uuid", related_articles[i])
+            result = fetch_article("uuid", related_articles[i])#[0]
             print(result)
-            st.subheader(get_article_entity("title", uuid.UUID(related_articles[i])))
-            date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
+            st.subheader(result["Title"])
+            date = f"📅 **Date:** {result["Date"]}"
             st.write(date)
-            tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
+            tags = f"🏷 **Tags:** {result["Tags"]}"
             st.write(tags)
-            persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
+            persons = f"🧑‍⚖️ **Persons:** {result["Persons"]}"
             st.write(persons)
-            companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
+            companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
             st.write(companies)
 
         
