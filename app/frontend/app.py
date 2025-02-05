@@ -1,17 +1,14 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import pandas as pd
 import spacy
 import networkx as nx
 from pyvis.network import Network
 import tempfile
-import os
 from pinecone import Pinecone
 import math
-import psycopg
 from psycopg_pool import ConnectionPool
 import uuid
-from typing import List
+import Levenshtein
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -178,9 +175,29 @@ def get_paginated_articles(offset, limit):
 # Cached spaCy model loading
 @st.cache_resource
 def load_spacy_model():
-    return spacy.load("en_core_web_trf")
+        return spacy.load("en_core_web_trf")
 
-def process_text(text, nlp):
+def clean_entities(entities, db_ents, method = 'levenshtein'):
+    matches = {}
+    
+    for extracted in db_ents:
+        best_match = None
+        
+        for reference in entities:
+            # Levenshtein calculates character-level edit distance
+            if method == 'levenshtein':
+                # Normalize by dividing by longer string length
+                score = 1 - (Levenshtein.distance(extracted, reference) / 
+                             max(len(extracted), len(reference)))
+        
+    if score > 0.7:
+        matches[extracted] = {
+            'match': best_match, //sets match to none?
+        }
+    return matches
+
+def process_text(text, nlp, db_ents):
+
     """Extract entities and their relationships from text."""
     doc = nlp(text)
     entities = []
@@ -196,8 +213,11 @@ def process_text(text, nlp):
         for i, ent1 in enumerate(sent_ents):
             for ent2 in sent_ents[i+1:]:
                 relations.append((ent1.text, ent2.text))
-    
-    return entities, relations
+
+    #clean data
+    matched_ents = clean_entities(entities[1:4], db_ents)
+    return_ents = [ent for ent in matched_ents.keys()]
+    return return_ents, relations
 
 def create_graph(entities, relations):
     """Create a NetworkX graph from entities and relations."""
@@ -306,12 +326,9 @@ def show_article_list():
     # Display articles
     for uuid, title, date, summary in articles:
         with st.container():
-            st.write(f"**Date: {date}**")
             if st.button(f"{title}", key=f"btn_{uuid}"):
                 st.session_state.selected_article = uuid
                 st.session_state.page = "article_detail"
-                #st.experimental_rerun()
-            #st.write(summary)
             st.divider()
     
     # Pagination controls
@@ -320,7 +337,6 @@ def show_article_list():
         if current_page > 1:
             if st.button("← Previous"):
                 st.session_state.current_page = current_page - 1
-                #st.experimental_rerun()
     
     with col2:
         st.write(f"Page {current_page} of {total_pages}")
@@ -329,7 +345,6 @@ def show_article_list():
         if current_page < total_pages:
             if st.button("Next →"):
                 st.session_state.current_page = current_page + 1
-                # st.experimental_rerun()
 
 def show_article_detail(nlp):
     """Display the article detail page."""
@@ -338,7 +353,8 @@ def show_article_detail(nlp):
     all_ents = []
     all_relations = []
     curr_summary = get_article_entity("summary", st.session_state.selected_article)
-    ents, relations = process_text(str(curr_summary), nlp)
+    curr_entities = fetch_article('uuid',st.session_state.selected_article)
+    ents, relations = process_text(str(curr_summary), nlp, curr_entities)
     all_ents.extend(ents)
     all_ents.extend(relations)
 
@@ -346,7 +362,8 @@ def show_article_detail(nlp):
         #fetch summary
         summary = get_article_entity("summary", uuid.UUID(article))
         #process summary
-        ents, relations = process_text(str(summary), nlp)
+        curr_entities = fetch_article('uuid',st.session_state.selected_article)
+        ents, relations = process_text(str(summary), nlp, curr_entities)
         all_ents.extend(ents)
         all_relations.extend(relations)
 
@@ -375,10 +392,6 @@ def show_article_detail(nlp):
                 companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
                 st.write(companies)
 
-        
-
-
-    
     # Add back button
     if st.button("← Back to Articles"):
         st.session_state.page = "list"
@@ -406,12 +419,12 @@ def main():
     st.sidebar.header("Filters")
         
     # Sidebar for navigation
-    menu = ["Search", "Knowledge Graph"]
+    menu = ["Search", "Knowledge Graph", "Timeline"]
     choice = st.sidebar.selectbox("Navigation", menu)
     
     # Load spaCy model
     nlp = load_spacy_model()
-
+    
     if choice == "Search":
         st.subheader("Document Search")
         # Search options
@@ -423,48 +436,12 @@ def main():
         
         if st.button("Search"):
             # Fetch documents
-            # results = fetch_documents_by_field(search_type.lower(), search_query)
-            # results = get_filtered_article(search_query, search_type)
             print(search_type)
             results = fetch_article(search_type, search_query)
             if len(results) != 0:
                 st.dataframe(results)
-                
-                # Related Articles from Pinecone
-                # related_articles = query_pinecone(st.session_state.selected_article)
-                
-                # st.subheader("Related Articles")
-                # print(related_articles)
-                # #displaying of the 3 articles
-                # cols = st.columns(3)  # 3 columns for 3 articles
-                # for i, col in enumerate(cols):
-                #     with col:
-                #         st.subheader(get_article_entity("title", related_articles[i]))
-                #         date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
-                #         st.write(date)
-                #         tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
-                #         st.write(tags)
-                #         persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
-                #         st.write(persons)
-                #         companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
-                #         st.write(companies)
 
-                # Knowledge Graph
-                # all_entities = []
-                # all_relations = [] 
-                # for article in related_articles:
-                #     entities, relations = process_text(article, nlp)
-                #     all_entities.append(entities)
-                #     all_relations.append(relations)
-                # G = create_graph(all_entities, all_relations)
-                # html_file = visualize_graph(G)
-                # with open(html_file, 'r', encoding='utf-8') as f:
-                #     html_data = f.read()
-                # st.components.v1.html(html_data, height=800)
-            
-                # # Clean up
-                # os.unlink(html_file)
-                
+               
     if 'page' not in st.session_state:
         st.session_state.page = "list"
     
@@ -474,31 +451,5 @@ def main():
     elif st.session_state.page == "article_detail":
         show_article_detail(nlp)
     
-                
-                # for article in related_articles:
-                #     st.write(article['metadata']['title'])
-    
-    # elif choice == "Knowledge Graph":
-    #     st.subheader("Knowledge Graph Visualization")
-        
-    #     # Input for graph generation
-    #     input_text = st.text_area("Enter text to generate knowledge graph")
-        
-    #     if st.button("Generate Graph"):
-    #         # Process text and create graph
-    #         entities, relations = process_text(input_text, nlp)
-    #         G = create_graph(entities, relations)
-            
-    #         # Visualize graph
-    #         html_file = visualize_graph(G)
-            
-    #         with open(html_file, 'r', encoding='utf-8') as f:
-    #             html_data = f.read()
-    #         st.components.v1.html(html_data, height=800)
-            
-    #         # Clean up
-    #         os.unlink(html_file)
-
-
 if __name__ == "__main__":
     main()
