@@ -9,6 +9,7 @@ import math
 from psycopg_pool import ConnectionPool
 import uuid
 import Levenshtein
+import itertools
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -67,7 +68,6 @@ def fetch_article(field ,value):
                 value = value[0].capitalize() + value[1:]
             if field == "Tags":
                 field = "zeroshot_labels"
-            print(field)
             if field == "zeroshot_labels" or field == "orgs" or field== "persons":
                 query = f"""
                 SELECT 
@@ -177,27 +177,97 @@ def get_paginated_articles(offset, limit):
 def load_spacy_model():
         return spacy.load("en_core_web_trf")
 
-def clean_entities(entities, db_ents, method = 'levenshtein'):
+def clean_entities(extracted, db_entries, threshold=0.7):
+    references = [x for item in db_entries for x in (item if isinstance(item, list) else [item])]
     matches = {}
     
-    for extracted in db_ents:
+    for extracted in extracted:
         best_match = None
-        
-        for reference in entities:
-            # Levenshtein calculates character-level edit distance
-            if method == 'levenshtein':
-                # Normalize by dividing by longer string length
+        best_score = 0
+        for reference in references:
+            if reference:
+            # Normalized Levenshtein similarity
                 score = 1 - (Levenshtein.distance(extracted, reference) / 
-                             max(len(extracted), len(reference)))
-        
-    if score > 0.7:
-        matches[extracted] = {
-            'match': best_match, //sets match to none?
+                            max(len(extracted), len(reference)))
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = reference
+            
+        # Only add matches above threshold
+        if best_score > threshold:
+            matches[extracted] = {
+                'match': best_match, 
         }
     return matches
 
-def process_text(text, nlp, db_ents):
 
+def extract_relationships(doc):
+    relationships = []
+    
+    # Use dependency parsing to find relationships
+    for token in doc:
+        # Subject-Verb-Object relationships
+        if token.dep_ in ["nsubj", "nsubjpass"] and token.head.pos_ == "VERB":
+            subject = token.text
+            verb = token.head.text
+            
+            # Find direct object
+            dobjs = [child for child in token.head.children if child.dep_ == "dobj"]
+            for dobj in dobjs:
+                relationships.append({
+                    "subject": subject,
+                    "verb": verb,
+                    "object": dobj.text,
+                    "type": "action"
+                })
+        
+        # Noun-Modifier relationships
+        if token.dep_ == "amod":
+            relationships.append({
+                "entity": token.head.text,
+                "modifier": token.text,
+                "type": "description"
+            })
+        
+        # Possessive relationships
+        if token.dep_ == "poss":
+            relationships.append({
+                "possessor": token.text,
+                "possessed": token.head.text,
+                "type": "possession"
+            })
+    
+    return relationships
+
+def process_text(text, nlp, db_ents):
+    doc = nlp(text)
+    
+    # Extract named entities
+    entities = [(ent.text, ent.label_) for ent in doc.ents 
+                if ent.label_ not in ["DATE", "CARDINAL"]]
+    
+    # Extract meaningful relationships
+    relationships = extract_relationships(doc)
+    
+    #clean data
+    items = []
+    for key, value in db_ents[0].items():
+        if key not in ["Summary", "Date", "Link", "Title"]:
+            if value:
+                items.append(value)
+    matched_ents = clean_entities(entities, items)
+    return_ents = [ent for ent in matched_ents.keys()]
+    print("\n")
+    print(matched_ents)
+    print("\n")
+    print("\n")
+    print(relationships)
+    print("\n")
+    return return_ents, relationships
+
+
+# def process_text(text, nlp, db_ents):
     """Extract entities and their relationships from text."""
     doc = nlp(text)
     entities = []
@@ -205,6 +275,8 @@ def process_text(text, nlp, db_ents):
     
     # Extract named entities
     for ent in doc.ents:
+        if ent.label_ in ["DATE", "CARDINAL"]:
+            continue
         entities.append((ent.text, ent.label_))
         
     # Create relationships between entities that appear in the same sentence
@@ -215,11 +287,15 @@ def process_text(text, nlp, db_ents):
                 relations.append((ent1.text, ent2.text))
 
     #clean data
-    matched_ents = clean_entities(entities[1:4], db_ents)
+    items = []
+    for key, value in db_ents[0].items():
+        if key not in ["Summary", "Date", "Link", "Title"]:
+            items.append(value)
+    matched_ents = clean_entities(entities, items)
     return_ents = [ent for ent in matched_ents.keys()]
     return return_ents, relations
 
-def create_graph(entities, relations):
+# def create_graph(entities, relations):
     """Create a NetworkX graph from entities and relations."""
     G = nx.Graph()
     
@@ -232,7 +308,30 @@ def create_graph(entities, relations):
     
     return G
 
-def visualize_graph(G):
+def create_graph(entities, relationships):
+    """Create a NetworkX graph from entities and relationships."""
+    G = nx.Graph()
+   
+    # Add nodes with entity types as attributes
+    for entity, entity_type in entities:
+        G.add_node(entity, title=f"{entity} ({entity_type})")
+   
+    # Add edges with relationship details
+    for rel in relationships:
+        if rel.get("type") == "action":
+            G.add_edge(rel["subject"], rel["object"], 
+                       label=rel["verb"], 
+                       relationship_type="action")
+        elif rel.get("type") == "description":
+            G.add_edge(rel["entity"], rel["modifier"], 
+                       relationship_type="description")
+        elif rel.get("type") == "possession":
+            G.add_edge(rel["possessor"], rel["possessed"], 
+                       relationship_type="possession")
+    return G
+
+
+#def visualize_graph(G):
     """Convert NetworkX graph to Pyvis network for visualization."""
     net = Network(height="750px", width="100%", bgcolor="#ffffff", font_color="black")
     
@@ -242,6 +341,14 @@ def visualize_graph(G):
     
     for edge in G.edges():
         net.add_edge(edge[0], edge[1])
+
+    net.repulsion(
+        node_distance=200,
+        central_gravity=0.2,
+        spring_length=200,
+        spring_strength=0.05,
+        damping=0.09,
+    )
     
     # Generate HTML file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
@@ -249,6 +356,42 @@ def visualize_graph(G):
         with open(tmpfile.name, "r", encoding = "utf-8") as f:
             html_content = f.read()
         
+    return html_content
+
+def visualize_graph(G):
+    """Convert NetworkX graph to Pyvis network for visualization."""
+    net = Network(height="750px", width="100%", bgcolor="#ffffff", font_color="black")
+   
+    # Add nodes with enhanced attributes
+    for node, node_attrs in G.nodes(data=True):
+        title = node_attrs.get('title', node)
+        net.add_node(node, title=title, label=node)
+   
+    # Add edges with relationship details
+    for edge in G.edges(data=True):
+        source, target, edge_attrs = edge
+        label = edge_attrs.get('label', '')
+        rel_type = edge_attrs.get('relationship_type', '')
+        
+        net.add_edge(source, target, 
+                     title=f"{rel_type}: {label}", 
+                     label=rel_type)
+    
+    # Customize network layout
+    net.repulsion(
+        node_distance=200,
+        central_gravity=0.2,
+        spring_length=200,
+        spring_strength=0.05,
+        damping=0.09,
+    )
+   
+    # Generate HTML file
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
+        net.save_graph(tmpfile.name)
+        with open(tmpfile.name, "r", encoding="utf-8") as f:
+            html_content = f.read()
+       
     return html_content
 
 def get_paginated_articles(offset, limit):
@@ -350,11 +493,21 @@ def show_article_detail(nlp):
     """Display the article detail page."""
     details = get_article_details(st.session_state.selected_article)
     related_articles = query_pinecone(str(st.session_state.selected_article))
+    print(st.session_state.selected_article)
     all_ents = []
     all_relations = []
     curr_summary = get_article_entity("summary", st.session_state.selected_article)
-    curr_entities = fetch_article('uuid',st.session_state.selected_article)
+    curr_entities = fetch_article("uuid",st.session_state.selected_article)
     ents, relations = process_text(str(curr_summary), nlp, curr_entities)
+    print("\n")
+    print(ents)
+    print("\n")
+
+    print("\n")
+    print(relations)
+    print("\n")
+
+
     all_ents.extend(ents)
     all_ents.extend(relations)
 
@@ -362,10 +515,19 @@ def show_article_detail(nlp):
         #fetch summary
         summary = get_article_entity("summary", uuid.UUID(article))
         #process summary
-        curr_entities = fetch_article('uuid',st.session_state.selected_article)
+        curr_entities = fetch_article("uuid",st.session_state.selected_article)
         ents, relations = process_text(str(summary), nlp, curr_entities)
         all_ents.extend(ents)
         all_relations.extend(relations)
+
+    ## related_articles_data = []
+    ## for article_uuid in related_articles:
+    ##    result = fetch_article("uuid", article_uuid)
+    ##     if len(result) >= 1:
+    ##         related_articles_data.append(result[0])  # Take the first match
+
+    # **Sort related articles by date (newest first)**
+    ##related_articles_data.sort(key=lambda x: x["Date"], reverse=True)
 
     #call graph function
     g = create_graph(all_ents, all_relations)
@@ -374,7 +536,6 @@ def show_article_detail(nlp):
 
 
     st.subheader("Related Articles")
-    #displaying of the 3 articles
     cols = st.columns(3)  # 3 columns for 3 articles
     
     for i, col in enumerate(cols):
@@ -436,7 +597,6 @@ def main():
         
         if st.button("Search"):
             # Fetch documents
-            print(search_type)
             results = fetch_article(search_type, search_query)
             if len(results) != 0:
                 st.dataframe(results)
