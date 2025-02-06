@@ -1,17 +1,16 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import pandas as pd
 import spacy
+from spacy.tokens import Token, Span
 import networkx as nx
 from pyvis.network import Network
 import tempfile
-import os
 from pinecone import Pinecone
 import math
-import psycopg
 from psycopg_pool import ConnectionPool
 import uuid
-from typing import List
+import os
+import Levenshtein
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -70,8 +69,7 @@ def fetch_article(field ,value):
                 value = value[0].capitalize() + value[1:]
             if field == "Tags":
                 field = "zeroshot_labels"
-            print(field)
-            if field == "zeroshot_labels" or field == "org" or field== "persons":
+            if field == "zeroshot_labels" or field == "orgs" or field== "persons":
                 query = f"""
                 SELECT 
                 ARRAY_AGG(g.name) AS gpe_names,
@@ -116,7 +114,6 @@ def fetch_article(field ,value):
                 cur.execute(query, (value, ))
             output = []
             results = cur.fetchall()
-            print(field)
             for result in results:
                 output_dict = {"Title": result[1],"Geo-Political Entities": result[0], "Orgs": result[2], "Tags": result[3], "Persons": result[4],
                         "Link": result[5], "Date": result[6], "Summary": result[7]}
@@ -179,58 +176,211 @@ def get_paginated_articles(offset, limit):
 # Cached spaCy model loading
 @st.cache_resource
 def load_spacy_model():
-    return spacy.load("en_core_web_trf")
+        return spacy.load("en_core_web_trf")
 
-def process_text(text, nlp):
-    """Extract entities and their relationships from text."""
+def clean_entities(entities, db_ents, method = 'levenshtein'):
+    matches = {}
+    
+    for extracted in db_ents:
+        best_match = None
+        
+        for reference in entities:
+            # Levenshtein calculates character-level edit distance
+            if method == 'levenshtein':
+                # Normalize by dividing by longer string length
+                score = 1 - (Levenshtein.distance(extracted, reference) / 
+                             max(len(extracted), len(reference)))
+        
+    if score > 0.7:
+        matches[extracted] = {
+            'match': best_match
+        }
+    return matches
+
+def process_text(text: str, nlp, db_ents):
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Input text must be a non-empty string")
+    
     doc = nlp(text)
     entities = []
     relations = []
     
-    # Extract named entities
+    # Extract named entities with special handling for organizations and people
+    seen_entities = set()
     for ent in doc.ents:
-        entities.append((ent.text, ent.label_))
+        # Clean entity text
+        clean_text = ent.text.strip('" ')
+        if clean_text and clean_text not in seen_entities:
+            entities.append((clean_text, ent.label_))
+            seen_entities.add(clean_text)
+
+    def find_quoted_text(sent: Span):
+        """Find quoted text and its speaker in a sentence."""
+        quotes = []
+        quote_start = None
+        quote_text = ""
         
-    # Create relationships between entities that appear in the same sentence
+        for i, token in enumerate(sent):
+            if token.text in ['"', '"', '"']:
+                if quote_start is None:
+                    quote_start = i
+                else:
+                    quote_text = sent[quote_start+1:i].text
+                    # Find the speaker (usually before the quote)
+                    speaker = None
+                    for ent in sent.ents:
+                        if ent.end < quote_start:
+                            speaker = ent
+                    if speaker:
+                        quotes.append((speaker, quote_text))
+                    quote_start = None
+        return quotes
+
+    def find_reporting_verbs(token: Token) -> bool:
+        """Check if token is a reporting verb commonly used in news."""
+        reporting_verbs = {
+            'say', 'tell', 'report', 'announce', 'state', 'mention',
+            'inform', 'indicate', 'reveal', 'confirm', 'add', 'note'
+        }
+        return token.lemma_ in reporting_verbs
+
+    # Process each sentence
     for sent in doc.sents:
-        sent_ents = [ent for ent in sent.ents]
+        sent_ents = list(sent.ents)
+        
+        if len(sent_ents) < 2:
+            continue
+        
+        # Find quotes and their speakers
+        quotes = find_quoted_text(sent)
+        for speaker, quote in quotes:
+            relations.append((speaker.text, "said", quote))
+
+        
+        # Process entity pairs
         for i, ent1 in enumerate(sent_ents):
             for ent2 in sent_ents[i+1:]:
-                relations.append((ent1.text, ent2.text))
-    
+                
+                # Skip if entities are too far apart
+                TOKEN_DISTANCE_THRESHOLD = 15  # Increased for news articles
+                if abs(ent1.root.i - ent2.root.i) > TOKEN_DISTANCE_THRESHOLD:
+                    continue
+
+                relation = None
+                
+                # Check for reporting relationships
+                for token in sent:
+                    if find_reporting_verbs(token):
+                        if ent1.root.head == token or any(t.head == token for t in ent1.root.children):
+                            relation = token.lemma_
+                            relations.append((ent1.text, relation, ent2.text))
+                
+                # Check for ownership/affiliation patterns
+                if not relation:
+                    for token in sent:
+                        if token.dep_ == "prep" and token.text == "of":
+                            if (ent1.end <= token.i <= ent2.start or 
+                                ent2.end <= token.i <= ent1.start):
+                                relations.append((ent2.text, "part_of", ent1.text))
+
+                # Add general relationship if none found
+                if not relation:
+                    # Look for verb connections
+                    for token in sent:
+                        if (token.pos_ == "VERB" and 
+                            token.i > ent1.end and token.i < ent2.start):
+                            relation = token.lemma_
+                            relations.append((ent1.text, relation, ent2.text))
+                            break
     return entities, relations
 
 def create_graph(entities, relations):
-    """Create a NetworkX graph from entities and relations."""
-    G = nx.Graph()
-    
-    # Add nodes with entity types as attributes
-    for entity, entity_type in entities:
-        G.add_node(entity, title=f"{entity} ({entity_type})")
-    
-    # Add edges
-    G.add_edges_from(relations)
-    
-    return G
-
-def visualize_graph(G):
-    """Convert NetworkX graph to Pyvis network for visualization."""
+    # Initialize network with physics enabled
     net = Network(height="750px", width="100%", bgcolor="#ffffff", font_color="black")
+    g = nx.Graph()
     
-    # Copy nodes and edges from NetworkX graph to Pyvis network
-    for node, node_attrs in G.nodes(data=True):
-        net.add_node(node, title=node_attrs.get('title', node))
+    # Disable force_atlas_2based as it can sometimes cause edge visibility issues
+    net.barnes_hut(gravity=-2000, central_gravity=0.3, spring_length=200)
+    net.show_buttons(filter_=['physics'])
     
-    for edge in G.edges():
-        net.add_edge(edge[0], edge[1])
+    # Entity color mapping
+    entity_colors = {
+        'PERSON': '#FF6B6B',
+        'ORG': '#4ECDC4',
+        'DATE': '#45B7D1',
+        'GPE': '#96CEB4',
+        'NORP': '#FFEEAD',
+        'MONEY': '#D4A373',
+        'PERCENT': '#A2D2FF',
+        'DEFAULT': '#CBD5E1'
+    }
+
+    # for e in entities:
+    #     g.add_node(e[0])
+    # for r in relations:
+    #     g.add_edge(r[0],r[1],label = r[2], title = r[2])
     
-    # Generate HTML file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmpfile:
-        net.save_graph(tmpfile.name)
-        with open(tmpfile.name, "r", encoding = "utf-8") as f:
-            html_content = f.read()
+    # print()
+    # print(g.edges(data = True))
+    
+    # # Add nodes directly to pyvis Network instead of using NetworkX
+    added_nodes = set()
+    
+    # Add nodes
+    for item in entities:
+        entity = item[0]
+        entity_type = item[1]
+        node_id = str(entity).strip()
+        if node_id and node_id not in added_nodes:
+            color = entity_colors.get(str(entity_type), entity_colors['DEFAULT'])
+            net.add_node(
+                node_id,
+                label=node_id,
+                title=f"Type: {entity_type}",
+                color=color,
+                size=25,
+                font={'size': 12, 'face': 'Arial'},
+                shape='dot',
+                borderWidth=2,
+                borderWidthSelected=4
+            )
+            added_nodes.add(node_id)
+    
+    # Add edges directly
+    for source, relation, target in relations:
+        source_id = str(source).strip()
+        target_id = str(target).strip()
+        relation = str(relation).strip()
         
-    return html_content
+        # Add missing nodes if they don't exist
+        for node_id in [source_id, target_id]:
+            if node_id and node_id not in added_nodes:
+                net.add_node(
+                    node_id,
+                    label=node_id,
+                    title="Type: Unknown",
+                    color=entity_colors['DEFAULT'],
+                    size=25,
+                    font={'size': 12, 'face': 'Arial'},
+                    shape='dot',
+                    borderWidth=2,
+                    borderWidthSelected=4
+                )
+                added_nodes.add(node_id)
+        
+        # Add edge with custom styling
+        if source_id and target_id:
+            net.add_edge(
+                source_id,
+                target_id,
+                title=relation,
+                label=relation,
+                font={'size': 10, 'face': 'Arial'},
+                width=2,
+                arrows='to',
+                smooth={'type': 'curvedCW', 'roundness': 0.2}
+            )
+    return net
 
 def get_paginated_articles(offset, limit):
     """Get a page of articles with basic information."""
@@ -307,12 +457,9 @@ def show_article_list():
     # Display articles
     for uuid, title, date, summary in articles:
         with st.container():
-            st.write(f"**Date: {date}**")
             if st.button(f"{title}", key=f"btn_{uuid}"):
                 st.session_state.selected_article = uuid
                 st.session_state.page = "article_detail"
-                #st.experimental_rerun()
-            #st.write(summary)
             st.divider()
     
     # Pagination controls
@@ -321,7 +468,6 @@ def show_article_list():
         if current_page > 1:
             if st.button("← Previous"):
                 st.session_state.current_page = current_page - 1
-                #st.experimental_rerun()
     
     with col2:
         st.write(f"Page {current_page} of {total_pages}")
@@ -330,7 +476,6 @@ def show_article_list():
         if current_page < total_pages:
             if st.button("Next →"):
                 st.session_state.current_page = current_page + 1
-                # st.experimental_rerun()
 
 def show_article_detail(nlp):
     """Display the article detail page."""
@@ -338,23 +483,31 @@ def show_article_detail(nlp):
     related_articles = query_pinecone(str(st.session_state.selected_article))
     all_ents = []
     all_relations = []
-    curr_summary = get_article_entity("summary", st.session_state.selected_article)
-    ents, relations = process_text(str(curr_summary), nlp)
-    all_ents.extend(ents)
-    all_ents.extend(relations)
-
+    all_summaries = ""
+    all_summaries += "Summary: " + str(get_article_entity("summary", st.session_state.selected_article))
     for article in related_articles:
-        #fetch summary
         summary = get_article_entity("summary", uuid.UUID(article))
-        #process summary
-        ents, relations = process_text(str(summary), nlp)
-        all_ents.extend(ents)
-        all_relations.extend(relations)
+        all_summaries += "Summary: " + str(summary)
+    
+    curr_entities = fetch_article('uuid',st.session_state.selected_article)
+    ents, relations = process_text(all_summaries, nlp, curr_entities)
 
     #call graph function
-    g = create_graph(all_ents, all_relations)
-    graph_html = visualize_graph(g)
-    components.html(graph_html, height=750, width=900, scrolling=True)
+    g = create_graph(ents, relations)
+    #graph_html = visualize_graph(g)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp_file:
+        path = tmp_file.name
+    
+    # Save and read the network
+    g.save_graph(path)
+    with open(path, 'r', encoding='utf-8') as file:
+        html_string = file.read()
+
+    # Delete temporary file
+    os.unlink(path)
+    
+    # Display in Streamlit
+    components.html(html_string, height=750, width=900, scrolling=True)
 
 
     st.subheader("Related Articles")
@@ -363,22 +516,19 @@ def show_article_detail(nlp):
     
     for i, col in enumerate(cols):
         with col:
-            result = fetch_article("uuid", related_articles[i])[0]
-            print(result)
-            st.subheader(result["Title"])
-            date = f"📅 **Date:** {result["Date"]}"
-            st.write(date)
-            tags = f"🏷 **Tags:** {result["Tags"]}"
-            st.write(tags)
-            persons = f"🧑‍⚖️ **Persons:** {result["Persons"]}"
-            st.write(persons)
-            companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
-            st.write(companies)
+            result = fetch_article("uuid", related_articles[i])
+            if len(result) >= 1:
+                result = result[0]
+                st.subheader(result["Title"])
+                date = f"📅 **Date:** {result["Date"]}"
+                st.write(date)
+                tags = f"🏷 **Tags:** {result["Tags"]}"
+                st.write(tags)
+                persons = f"🧑‍⚖️ **Persons:** {result["Persons"]}"
+                st.write(persons)
+                companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
+                st.write(companies)
 
-        
-
-
-    
     # Add back button
     if st.button("← Back to Articles"):
         st.session_state.page = "list"
@@ -406,12 +556,12 @@ def main():
     st.sidebar.header("Filters")
         
     # Sidebar for navigation
-    menu = ["Search", "Knowledge Graph"]
+    menu = ["Search", "Knowledge Graph", "Timeline"]
     choice = st.sidebar.selectbox("Navigation", menu)
     
     # Load spaCy model
     nlp = load_spacy_model()
-
+    
     if choice == "Search":
         st.subheader("Document Search")
         # Search options
@@ -423,48 +573,11 @@ def main():
         
         if st.button("Search"):
             # Fetch documents
-            # results = fetch_documents_by_field(search_type.lower(), search_query)
-            # results = get_filtered_article(search_query, search_type)
-            print(search_type)
             results = fetch_article(search_type, search_query)
             if len(results) != 0:
                 st.dataframe(results)
-                
-                # Related Articles from Pinecone
-                # related_articles = query_pinecone(st.session_state.selected_article)
-                
-                # st.subheader("Related Articles")
-                # print(related_articles)
-                # #displaying of the 3 articles
-                # cols = st.columns(3)  # 3 columns for 3 articles
-                # for i, col in enumerate(cols):
-                #     with col:
-                #         st.subheader(get_article_entity("title", related_articles[i]))
-                #         date = f"📅 **Date:** {get_article_entity("date", related_articles[i])}"
-                #         st.write(date)
-                #         tags = f"🏷 **Tags:** {', '.join(tag for tag in get_article_entity("zeroshot_labels", related_articles[i]))}"
-                #         st.write(tags)
-                #         persons = f"🧑‍⚖️ **Persons:** {', '.join(entity for entity in get_article_entity("persons", related_articles[i]))}"
-                #         st.write(persons)
-                #         companies = f"🧑‍⚖️ **Organisations:** {', '.join(entity for entity in get_article_entity("orgs", related_articles[i]))}"
-                #         st.write(companies)
 
-                # Knowledge Graph
-                # all_entities = []
-                # all_relations = [] 
-                # for article in related_articles:
-                #     entities, relations = process_text(article, nlp)
-                #     all_entities.append(entities)
-                #     all_relations.append(relations)
-                # G = create_graph(all_entities, all_relations)
-                # html_file = visualize_graph(G)
-                # with open(html_file, 'r', encoding='utf-8') as f:
-                #     html_data = f.read()
-                # st.components.v1.html(html_data, height=800)
-            
-                # # Clean up
-                # os.unlink(html_file)
-                
+               
     if 'page' not in st.session_state:
         st.session_state.page = "list"
     
@@ -474,31 +587,5 @@ def main():
     elif st.session_state.page == "article_detail":
         show_article_detail(nlp)
     
-                
-                # for article in related_articles:
-                #     st.write(article['metadata']['title'])
-    
-    # elif choice == "Knowledge Graph":
-    #     st.subheader("Knowledge Graph Visualization")
-        
-    #     # Input for graph generation
-    #     input_text = st.text_area("Enter text to generate knowledge graph")
-        
-    #     if st.button("Generate Graph"):
-    #         # Process text and create graph
-    #         entities, relations = process_text(input_text, nlp)
-    #         G = create_graph(entities, relations)
-            
-    #         # Visualize graph
-    #         html_file = visualize_graph(G)
-            
-    #         with open(html_file, 'r', encoding='utf-8') as f:
-    #             html_data = f.read()
-    #         st.components.v1.html(html_data, height=800)
-            
-    #         # Clean up
-    #         os.unlink(html_file)
-
-
 if __name__ == "__main__":
     main()
