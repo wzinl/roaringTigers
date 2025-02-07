@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 import uuid
 import os
 import Levenshtein
+import pandas as pd
 
 # AWS RDS and Pinecone Configuration
 AWS_REGION = st.secrets["REGION"]   
@@ -53,6 +54,7 @@ def get_article_entity(field, uuid):
                 cur.execute(query, (uuid,))
                 return cur.fetchall()
 
+
 def fetch_article(field ,value):
     # Fetch documents from RDS based on a specific field.
     connect_pool = ConnectionPool(conninfo=conn_str, min_size=1, max_size=10)
@@ -73,7 +75,7 @@ def fetch_article(field ,value):
                 query = f"""
                 SELECT 
                 ARRAY_AGG(g.name) AS gpe_names,
-                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary
+                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary, a.uuid
                 FROM ARTICLES a
                 JOIN article_gpe ag ON a.article_id = ag.article_id
                 JOIN gpe g ON ag.gpe_id = g.gpe_id
@@ -85,7 +87,8 @@ def fetch_article(field ,value):
                     a.persons, 
                     a.link, 
                     a.date, 
-                    a.summary;
+                    a.summary,
+                    a.uuid;
                 """
                 cur.execute(query, (value,))
             else:
@@ -97,7 +100,7 @@ def fetch_article(field ,value):
                 query = f"""
                 SELECT 
                 ARRAY_AGG(g.name) AS gpe_names,
-                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary
+                a.title, a.orgs, a.zeroshot_labels, a.persons, a.link, a.date, a.summary, a.uuid
                 FROM ARTICLES a
                 JOIN article_gpe ag ON a.article_id = ag.article_id
                 JOIN gpe g ON ag.gpe_id = g.gpe_id
@@ -109,14 +112,15 @@ def fetch_article(field ,value):
                     a.persons, 
                     a.link, 
                     a.date, 
-                    a.summary;
+                    a.summary,
+                    a.uuid;
                 """
                 cur.execute(query, (value, ))
             output = []
             results = cur.fetchall()
             for result in results:
                 output_dict = {"Title": result[1],"Geo-Political Entities": result[0], "Orgs": result[2], "Tags": result[3], "Persons": result[4],
-                        "Link": result[5], "Date": result[6], "Summary": result[7]}
+                        "Link": result[5], "Date": result[6], "Summary": result[7], "uuid" : result[8]}
                 output.append(output_dict)
             return output
 
@@ -172,6 +176,10 @@ def get_paginated_articles(offset, limit):
                 (limit, offset)
             )
             return cur.fetchall()
+        
+def directArticle(uuid):
+    st.session_state.selected_article = uuid
+    st.session_state.page = "article_detail"
 
 # Cached spaCy model loading
 @st.cache_resource
@@ -202,17 +210,22 @@ def process_text(text: str, nlp, db_ents):
         raise ValueError("Input text must be a non-empty string")
     
     doc = nlp(text)
+    labelList = list()
+    for label in nlp.get_pipe("ner").labels:
+        if(label in ["FAC", "GPE", "LANGUAGE", "LAW", "LOC", "NORP", "ORG", "PERSON", "PRODUCT", "WORK_OF_ART"]):
+            labelList.append(label)
     entities = []
     relations = []
     
     # Extract named entities with special handling for organizations and people
     seen_entities = set()
     for ent in doc.ents:
-        # Clean entity text
-        clean_text = ent.text.strip('" ')
-        if clean_text and clean_text not in seen_entities:
-            entities.append((clean_text, ent.label_))
-            seen_entities.add(clean_text)
+        if ent.label_ in labelList:
+            # Clean entity text
+            clean_text = ent.text.strip('" ')
+            if clean_text and clean_text not in seen_entities:
+                entities.append((clean_text, ent.label_))
+                seen_entities.add(clean_text)
 
     def find_quoted_text(sent: Span):
         """Find quoted text and its speaker in a sentence."""
@@ -243,6 +256,11 @@ def process_text(text: str, nlp, db_ents):
             'inform', 'indicate', 'reveal', 'confirm', 'add', 'note'
         }
         return token.lemma_ in reporting_verbs
+    
+    labelList = list()
+    for label in nlp.get_pipe("ner").labels:
+        if(label in ["FAC", "GPE", "LANGUAGE", "LAW", "LOC", "NORP", "ORG", "PERSON", "PRODUCT", "WORK_OF_ART"]):
+            labelList.append(label)
 
     # Process each sentence
     for sent in doc.sents:
@@ -259,8 +277,12 @@ def process_text(text: str, nlp, db_ents):
         
         # Process entity pairs
         for i, ent1 in enumerate(sent_ents):
+            if ent1.label_ not in labelList:
+                continue
             for ent2 in sent_ents[i+1:]:
-                
+                if ent2.label_ not in labelList:
+                    continue
+
                 # Skip if entities are too far apart
                 TOKEN_DISTANCE_THRESHOLD = 15  # Increased for news articles
                 if abs(ent1.root.i - ent2.root.i) > TOKEN_DISTANCE_THRESHOLD:
@@ -281,7 +303,7 @@ def process_text(text: str, nlp, db_ents):
                         if token.dep_ == "prep" and token.text == "of":
                             if (ent1.end <= token.i <= ent2.start or 
                                 ent2.end <= token.i <= ent1.start):
-                                relations.append((ent2.text, "part_of", ent1.text))
+                                relations.append((ent2.text, "relates_to", ent1.text))
 
                 # Add general relationship if none found
                 if not relation:
@@ -315,14 +337,6 @@ def create_graph(entities, relations):
         'DEFAULT': '#CBD5E1'
     }
 
-    # for e in entities:
-    #     g.add_node(e[0])
-    # for r in relations:
-    #     g.add_edge(r[0],r[1],label = r[2], title = r[2])
-    
-    # print()
-    # print(g.edges(data = True))
-    
     # # Add nodes directly to pyvis Network instead of using NetworkX
     added_nodes = set()
     
@@ -400,7 +414,6 @@ def get_paginated_articles(offset, limit):
 def get_article_details(uuid):
     """Get detailed information about an article including entities."""
     details = {}
-    
     # Get basic article information
     with connect_pool.connection() as conn:
         with conn.cursor() as cur:
@@ -457,9 +470,8 @@ def show_article_list():
     # Display articles
     for uuid, title, date, summary in articles:
         with st.container():
-            if st.button(f"{title}", key=f"btn_{uuid}"):
-                st.session_state.selected_article = uuid
-                st.session_state.page = "article_detail"
+            st.button(f"{title}", key=f"btn_{uuid}", on_click = directArticle(uuid))
+
             st.divider()
     
     # Pagination controls
@@ -479,7 +491,7 @@ def show_article_list():
 
 def show_article_detail(nlp):
     """Display the article detail page."""
-    details = get_article_details(st.session_state.selected_article)
+    details = fetch_article('uuid',st.session_state.selected_article)
     related_articles = query_pinecone(str(st.session_state.selected_article))
     all_ents = []
     all_relations = []
@@ -510,16 +522,15 @@ def show_article_detail(nlp):
     components.html(html_string, height=750, width=900, scrolling=True)
 
 
-    st.subheader("Related Articles")
+    st.header("Related Articles")
     #displaying of the 3 articles
-    cols = st.columns(3)  # 3 columns for 3 articles
-    
-    for i, col in enumerate(cols):
-        with col:
-            result = fetch_article("uuid", related_articles[i])
-            if len(result) >= 1:
+    for i in range (3):
+        result = fetch_article("uuid", related_articles[i])
+        with st.container():
+            if result:
                 result = result[0]
                 st.subheader(result["Title"])
+                st.button(f"Go to article", key=f"btn_{related_articles[i]}", on_click = directArticle(related_articles[i]))
                 date = f"📅 **Date:** {result["Date"]}"
                 st.write(date)
                 tags = f"🏷 **Tags:** {result["Tags"]}"
@@ -528,6 +539,7 @@ def show_article_detail(nlp):
                 st.write(persons)
                 companies = f"🧑‍⚖️ **Organisations:** {result["Orgs"]}"
                 st.write(companies)
+                st.divider()
 
     # Add back button
     if st.button("← Back to Articles"):
@@ -535,28 +547,40 @@ def show_article_detail(nlp):
         #st.experimental_rerun()
     
     # Display article details
-    st.title(details['title'])
-    st.write(f"**Date:** {details['date']}")
+
+    article_details = details[0]
+    st.title(article_details['Title'])
+    st.write(f"**Date:** {article_details['Date']}")
+    
+    if article_details['Tags']:
+        st.header("Labels")
+        st.write(", ".join(article_details['Tags']))
     
     st.header("Summary")
-    st.write(details['summary'])
+    st.write(article_details['Summary'])
     
-    if details['labels']:
-        st.header("Labels")
-        st.write(", ".join(details['labels']))
+
     
-    if details['locations']:
+    if article_details['Geo-Political Entities']:
         st.header("Locations Mentioned")
-        st.write(", ".join(details['locations']))
+        st.write(", ".join(article_details['Geo-Political Entities']))
+
+    if article_details['Orgs']:
+        st.header("Organisations Mentioned")
+        st.write(", ".join(article_details['Orgs']))
+
+    if article_details['Persons']:
+        st.header("Persons Mentioned")
+        st.write(", ".join(article_details['Persons']))
 
 def main():
-    st.title("Advanced Knowledge Graph Explorer")
+    st.title("NewsNetwork")
 
     # Sidebar filters
     st.sidebar.header("Filters")
         
     # Sidebar for navigation
-    menu = ["Search", "Knowledge Graph", "Timeline"]
+    menu = ["Search", "Knowledge Graph"]
     choice = st.sidebar.selectbox("Navigation", menu)
     
     # Load spaCy model
@@ -570,14 +594,19 @@ def main():
             search_query = st.selectbox(f"Enter {search_type}",("legal frameworks","economic sanctions","social justice","human rights violations","global governance","governance reform","language preservation","conflict resolution","epidemic management","innovation ecosystems","global economic policy","sustainable development","institutional transparency","pandemic response","digital transformation","economic development","geopolitical tensions","cultural exchange","emerging markets","international trade","indigenous rights","regional stability","cybersecurity","international sanctions","international conflict","technological policy","healthcare access","global health policy","tech diplomacy","gender equality","green technology","poverty alleviation","climate change policy","diplomatic negotiations","humanitarian crisis","UN diplomacy","healthcare infrastructure","international security","environmental justice","vaccine distribution","military interventions","refugee policy","technology transfer","academic development","natural disaster response","conservation efforts","educational policy","environmental protection","arms control","infrastructure development","terrorism","international law","humanitarian aid","peacekeeping operations","medical research"))
         else:
             search_query = st.text_input(f"Enter {search_type}")
-        
+
         if st.button("Search"):
             # Fetch documents
             results = fetch_article(search_type, search_query)
-            if len(results) != 0:
-                st.dataframe(results)
+            resultdf = pd.DataFrame(results)
+            # Display the table with buttons
+            st.write("### Search Results:")
+            for index, row in resultdf.iterrows():
+                col1, col2 = st.columns([3, 1])  # 4:1 ratio for better layout
+                col1.write(f"**{row['Title']}**")
+        
+                col2.button("Open", key=f"btn1_{row['uuid']}", on_click = directArticle(row['uuid']))
 
-               
     if 'page' not in st.session_state:
         st.session_state.page = "list"
     
@@ -589,3 +618,4 @@ def main():
     
 if __name__ == "__main__":
     main()
+

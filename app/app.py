@@ -7,6 +7,7 @@ import tempfile
 from pinecone import Pinecone
 import math
 from psycopg_pool import ConnectionPool
+import pandas as pd
 import uuid
 import Levenshtein
 import itertools
@@ -258,12 +259,12 @@ def process_text(text, nlp, db_ents):
                 items.append(value)
     matched_ents = clean_entities(entities, items)
     return_ents = [ent for ent in matched_ents.keys()]
-    print("\n")
-    print(matched_ents)
-    print("\n")
-    print("\n")
-    print(relationships)
-    print("\n")
+    # print("\n")
+    # print(matched_ents)
+    # print("\n")
+    # print("\n")
+    # print(relationships)
+    # print("\n")
     return return_ents, relationships
 
 
@@ -493,19 +494,19 @@ def show_article_detail(nlp):
     """Display the article detail page."""
     details = get_article_details(st.session_state.selected_article)
     related_articles = query_pinecone(str(st.session_state.selected_article))
-    print(st.session_state.selected_article)
+    # print(st.session_state.selected_article)
     all_ents = []
     all_relations = []
     curr_summary = get_article_entity("summary", st.session_state.selected_article)
     curr_entities = fetch_article("uuid",st.session_state.selected_article)
     ents, relations = process_text(str(curr_summary), nlp, curr_entities)
-    print("\n")
-    print(ents)
-    print("\n")
+    # print("\n")
+    # print(ents)
+    # print("\n")
 
-    print("\n")
-    print(relations)
-    print("\n")
+    # print("\n")
+    # print(relations)
+    # print("\n")
 
 
     all_ents.extend(ents)
@@ -599,7 +600,15 @@ def main():
             # Fetch documents
             results = fetch_article(search_type, search_query)
             if len(results) != 0:
-                st.dataframe(results)
+                # print(results)
+                # for result in results:
+                #     print(result)
+                results.apply(add_buttons, axis=1)
+                for index, row in results.iterrows():
+                    results.write(row)
+                
+            
+
 
                
     if 'page' not in st.session_state:
@@ -613,3 +622,6 @@ def main():
     
 if __name__ == "__main__":
     main()
+
+def add_buttons(row):
+    return row.append(pd.Series([st.button('Edit', key=f'edit{row.name}'), st.button('Delete', key=f'delete{row.name}')]))
