@@ -250,11 +250,57 @@ def process_text(text: str, nlp, db_ents):
         return quotes
 
     def find_reporting_verbs(token: Token) -> bool:
-        """Check if token is a reporting verb commonly used in news."""
-        reporting_verbs = {
-            'say', 'tell', 'report', 'announce', 'state', 'mention',
-            'inform', 'indicate', 'reveal', 'confirm', 'add', 'note'
+        # Basic statement verbs
+        statement_verbs = {
+            'say', 'tell', 'speak', 'state', 'mention', 'comment', 'note', 'add',
+            'remark', 'observe', 'declare', 'express', 'voice', 'articulate'
         }
+        
+        # Information sharing verbs
+        information_verbs = {
+            'report', 'inform', 'announce', 'reveal', 'disclose', 'confirm',
+            'indicate', 'communicate', 'convey', 'relay', 'brief', 'notify',
+            'publish', 'broadcast', 'transmit', 'dispatch', 'circulate'
+        }
+        
+        # Opinion and analysis verbs
+        opinion_verbs = {
+            'argue', 'claim', 'assert', 'maintain', 'contend', 'suggest',
+            'emphasize', 'stress', 'highlight', 'propose', 'recommend',
+            'conclude', 'determine', 'assess', 'evaluate'
+        }
+        
+        # Response and reaction verbs
+        response_verbs = {
+            'respond', 'reply', 'answer', 'retort', 'counter', 'rebut',
+            'acknowledge', 'address', 'react', 'defend', 'dispute', 'challenge'
+        }
+        
+        # Emotional or characterized speech verbs
+        emotional_verbs = {
+            'insist', 'urge', 'plead', 'demand', 'warn', 'caution', 'advise',
+            'complain', 'lament', 'protest', 'object', 'criticize', 'praise',
+            'boast', 'promise', 'guarantee', 'pledge', 'vow'
+        }
+        
+        # Written communication verbs
+        written_verbs = {
+            'write', 'document', 'record', 'compose', 'draft', 'author',
+            'describe', 'detail', 'outline', 'summarize', 'cite', 'quote'
+        }
+        
+        # Group discussion verbs
+        discussion_verbs = {
+            'discuss', 'debate', 'negotiate', 'consult', 'deliberate',
+            'confer', 'collaborate', 'coordinate', 'agree', 'disagree',
+            'dispute', 'settle', 'resolve'
+        }
+        
+        # Compilation of all reporting verbs
+        reporting_verbs = (statement_verbs | information_verbs | opinion_verbs | 
+                        response_verbs | emotional_verbs | written_verbs | 
+                        discussion_verbs)
+    
         return token.lemma_ in reporting_verbs
     
     labelList = list()
@@ -493,8 +539,6 @@ def show_article_detail(nlp):
     """Display the article detail page."""
     details = fetch_article('uuid',st.session_state.selected_article)
     related_articles = query_pinecone(str(st.session_state.selected_article))
-    all_ents = []
-    all_relations = []
     all_summaries = ""
     all_summaries += "Summary: " + str(get_article_entity("summary", st.session_state.selected_article))
     for article in related_articles:
@@ -522,6 +566,35 @@ def show_article_detail(nlp):
     components.html(html_string, height=750, width=900, scrolling=True)
 
 
+        #st.experimental_rerun()
+    
+    # Display article details
+
+    article_details = details[0]
+    st.title(article_details['Title'])
+    st.write(f"**Date:** {article_details['Date']}")
+    
+    if article_details['Tags']:
+        st.header("Labels")
+        st.write(", ".join(article_details['Tags']))
+    
+    st.header("Summary")
+    st.write(article_details['Summary'])
+    
+    if article_details['Geo-Political Entities']:
+        st.header("Locations Mentioned")
+        st.write(", ".join(article_details['Geo-Political Entities']))
+
+    if article_details['Orgs']:
+        st.header("Organisations Mentioned")
+        st.write(", ".join(article_details['Orgs']))
+
+    if article_details['Persons']:
+        st.header("Persons Mentioned")
+        st.write(", ".join(article_details['Persons']))
+
+
+    
     st.header("Related Articles")
     #displaying of the 3 articles
     for i in range (3):
@@ -544,68 +617,38 @@ def show_article_detail(nlp):
     # Add back button
     if st.button("← Back to Articles"):
         st.session_state.page = "list"
-        #st.experimental_rerun()
-    
-    # Display article details
-
-    article_details = details[0]
-    st.title(article_details['Title'])
-    st.write(f"**Date:** {article_details['Date']}")
-    
-    if article_details['Tags']:
-        st.header("Labels")
-        st.write(", ".join(article_details['Tags']))
-    
-    st.header("Summary")
-    st.write(article_details['Summary'])
-    
-
-    
-    if article_details['Geo-Political Entities']:
-        st.header("Locations Mentioned")
-        st.write(", ".join(article_details['Geo-Political Entities']))
-
-    if article_details['Orgs']:
-        st.header("Organisations Mentioned")
-        st.write(", ".join(article_details['Orgs']))
-
-    if article_details['Persons']:
-        st.header("Persons Mentioned")
-        st.write(", ".join(article_details['Persons']))
 
 def main():
     st.title("NewsNetwork")
 
     # Sidebar filters
-    st.sidebar.header("Filters")
+    # st.sidebar.header("Filters")
         
     # Sidebar for navigation
-    menu = ["Search", "Knowledge Graph"]
-    choice = st.sidebar.selectbox("Navigation", menu)
+    # menu = ["Search"]
+    # choice = st.sidebar.selectbox("Navigation", menu)
     
     # Load spaCy model
     nlp = load_spacy_model()
     
-    if choice == "Search":
-        st.subheader("Document Search")
-        # Search options
-        search_type = st.selectbox("Search By", ["Tags", "Person", "Geo-Political Entity", "Organisation"])
-        if search_type == "Tags":
-            search_query = st.selectbox(f"Enter {search_type}",("legal frameworks","economic sanctions","social justice","human rights violations","global governance","governance reform","language preservation","conflict resolution","epidemic management","innovation ecosystems","global economic policy","sustainable development","institutional transparency","pandemic response","digital transformation","economic development","geopolitical tensions","cultural exchange","emerging markets","international trade","indigenous rights","regional stability","cybersecurity","international sanctions","international conflict","technological policy","healthcare access","global health policy","tech diplomacy","gender equality","green technology","poverty alleviation","climate change policy","diplomatic negotiations","humanitarian crisis","UN diplomacy","healthcare infrastructure","international security","environmental justice","vaccine distribution","military interventions","refugee policy","technology transfer","academic development","natural disaster response","conservation efforts","educational policy","environmental protection","arms control","infrastructure development","terrorism","international law","humanitarian aid","peacekeeping operations","medical research"))
-        else:
-            search_query = st.text_input(f"Enter {search_type}")
+    # st.subheader("Document Search")
+    # Search options
+    search_type = st.selectbox("Search By", ["Tags", "Person", "Geo-Political Entity", "Organisation"])
+    if search_type == "Tags":
+        search_query = st.selectbox(f"Enter {search_type}",("legal frameworks","economic sanctions","social justice","human rights violations","global governance","governance reform","language preservation","conflict resolution","epidemic management","innovation ecosystems","global economic policy","sustainable development","institutional transparency","pandemic response","digital transformation","economic development","geopolitical tensions","cultural exchange","emerging markets","international trade","indigenous rights","regional stability","cybersecurity","international sanctions","international conflict","technological policy","healthcare access","global health policy","tech diplomacy","gender equality","green technology","poverty alleviation","climate change policy","diplomatic negotiations","humanitarian crisis","UN diplomacy","healthcare infrastructure","international security","environmental justice","vaccine distribution","military interventions","refugee policy","technology transfer","academic development","natural disaster response","conservation efforts","educational policy","environmental protection","arms control","infrastructure development","terrorism","international law","humanitarian aid","peacekeeping operations","medical research"))
+    else:
+        search_query = st.text_input(f"Enter {search_type}")
 
-        if st.button("Search"):
-            # Fetch documents
-            results = fetch_article(search_type, search_query)
-            resultdf = pd.DataFrame(results)
-            # Display the table with buttons
-            st.write("### Search Results:")
-            for index, row in resultdf.iterrows():
-                col1, col2 = st.columns([3, 1])  # 4:1 ratio for better layout
-                col1.write(f"**{row['Title']}**")
-        
-                col2.button("Open", key=f"btn1_{row['uuid']}", on_click = directArticle(row['uuid']))
+    if st.button("Search"):
+        # Fetch documents
+        results = fetch_article(search_type, search_query)
+        resultdf = pd.DataFrame(results)
+        # Display the table with buttons
+        st.write("### Search Results:")
+        for index, row in resultdf.iterrows():
+            col1, col2 = st.columns([3, 1])  # 4:1 ratio for better layout
+            col1.write(f"**{row['Title']}**")
+            col2.button("Open", key=f"btn1_{row['uuid']}", on_click = directArticle(row['uuid']))
 
     if 'page' not in st.session_state:
         st.session_state.page = "list"
